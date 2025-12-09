@@ -4,7 +4,7 @@ import {
   collection, 
   query, 
   where, 
-  getDocs, 
+  onSnapshot,
   addDoc, 
   updateDoc, 
   deleteDoc, 
@@ -17,34 +17,62 @@ export const useSubjects = (userId) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Buscar todas as matérias do usuário
-  const fetchSubjects = async () => {
+  // Listener em tempo real para matérias do usuário
+  useEffect(() => {
     if (!userId) {
       setLoading(false);
+      setSubjects([]);
       return;
     }
 
-    try {
-      setLoading(true);
-      setError(null);
-      const q = query(
-        collection(db, 'subjects'),
-        where('uid', '==', userId)
-      );
-      const querySnapshot = await getDocs(q);
-      const subjectsData = [];
-      querySnapshot.forEach((docSnapshot) => {
-        subjectsData.push({ id: docSnapshot.id, ...docSnapshot.data() });
-      });
-      // Ordenar por nome
-      subjectsData.sort((a, b) => a.name.localeCompare(b.name));
-      setSubjects(subjectsData);
-    } catch (err) {
-      console.error('Erro ao buscar matérias:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    setError(null);
+
+    // Configurar query
+    const q = query(
+      collection(db, 'subjects'),
+      where('uid', '==', userId)
+    );
+
+    // Configurar listener em tempo real
+    const unsubscribe = onSnapshot(
+      q,
+      (querySnapshot) => {
+        try {
+          const subjectsData = [];
+          querySnapshot.forEach((docSnapshot) => {
+            subjectsData.push({ id: docSnapshot.id, ...docSnapshot.data() });
+          });
+          // Ordenar por nome
+          subjectsData.sort((a, b) => a.name.localeCompare(b.name));
+          setSubjects(subjectsData);
+          setError(null);
+        } catch (err) {
+          console.error('Erro ao processar snapshot:', err);
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      },
+      (err) => {
+        // Callback de erro do onSnapshot
+        console.error('Erro no listener de matérias:', err);
+        setError(err.message);
+        setLoading(false);
+      }
+    );
+
+    // Cleanup: desinscrever quando componente desmontar ou userId mudar
+    return () => {
+      unsubscribe();
+    };
+  }, [userId]);
+
+  // Função de busca manual (mantida para compatibilidade, mas não é mais necessária)
+  const fetchSubjects = async () => {
+    // Esta função não é mais necessária pois o listener atualiza automaticamente
+    // Mantida apenas para compatibilidade caso seja chamada em algum lugar
+    console.warn('fetchSubjects() não é mais necessária. Os dados são atualizados automaticamente via onSnapshot.');
   };
 
   // Criar nova matéria
@@ -60,7 +88,7 @@ export const useSubjects = (userId) => {
         createdAt: new Date().toISOString()
       };
       const docRef = await addDoc(collection(db, 'subjects'), newSubject);
-      await fetchSubjects();
+      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
       return { success: true, id: docRef.id };
     } catch (err) {
       console.error('Erro ao criar matéria:', err);
@@ -86,7 +114,7 @@ export const useSubjects = (userId) => {
         contents: updatedContents,
         updatedAt: new Date().toISOString()
       });
-      await fetchSubjects();
+      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
       return { success: true };
     } catch (err) {
       console.error('Erro ao adicionar conteúdo:', err);
@@ -107,10 +135,40 @@ export const useSubjects = (userId) => {
         contents: updatedContents,
         updatedAt: new Date().toISOString()
       });
-      await fetchSubjects();
+      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
       return { success: true };
     } catch (err) {
       console.error('Erro ao remover conteúdo:', err);
+      throw err;
+    }
+  };
+
+  // Atualizar matéria (nome e conteúdos)
+  const updateSubject = async (subjectId, newName, newContents) => {
+    if (!userId) throw new Error('Usuário não autenticado');
+    if (!newName.trim()) throw new Error('Nome da matéria é obrigatório');
+
+    try {
+      const subject = subjects.find(s => s.id === subjectId);
+      if (!subject) throw new Error('Matéria não encontrada');
+
+      // Validar que o novo nome não conflita com outras matérias (exceto a atual)
+      const nameExists = subjects.some(
+        s => s.id !== subjectId && s.name.toLowerCase() === newName.trim().toLowerCase()
+      );
+      if (nameExists) {
+        throw new Error('Já existe uma matéria com este nome');
+      }
+
+      await updateDoc(doc(db, 'subjects', subjectId), {
+        name: newName.trim(),
+        contents: newContents || [],
+        updatedAt: new Date().toISOString()
+      });
+      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
+      return { success: true };
+    } catch (err) {
+      console.error('Erro ao atualizar matéria:', err);
       throw err;
     }
   };
@@ -119,21 +177,13 @@ export const useSubjects = (userId) => {
   const deleteSubject = async (subjectId) => {
     try {
       await deleteDoc(doc(db, 'subjects', subjectId));
-      await fetchSubjects();
+      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
       return { success: true };
     } catch (err) {
       console.error('Erro ao excluir matéria:', err);
       throw err;
     }
   };
-
-  // Buscar matérias quando userId mudar
-  useEffect(() => {
-    if (userId) {
-      fetchSubjects();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
 
   // Obter conteúdos de uma matéria específica
   const getContentsBySubject = (subjectName) => {
@@ -151,6 +201,7 @@ export const useSubjects = (userId) => {
     loading,
     error,
     createSubject,
+    updateSubject,
     addContent,
     removeContent,
     deleteSubject,

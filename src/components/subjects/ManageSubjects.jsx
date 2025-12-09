@@ -9,7 +9,9 @@ import {
   BookOpen, 
   FileText, 
   AlertCircle,
-  CheckCircle
+  CheckCircle,
+  Pencil,
+  XCircle
 } from 'lucide-react';
 
 const ManageSubjects = ({ isOpen, onClose }) => {
@@ -18,6 +20,7 @@ const ManageSubjects = ({ isOpen, onClose }) => {
     subjects,
     loading,
     createSubject,
+    updateSubject,
     addContent,
     removeContent,
     deleteSubject
@@ -28,8 +31,72 @@ const ManageSubjects = ({ isOpen, onClose }) => {
   const [expandedSubject, setExpandedSubject] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [deletingSubject, setDeletingSubject] = useState(null);
+  
+  // Estados de edição
+  const [editingId, setEditingId] = useState(null);
+  const [editingName, setEditingName] = useState('');
+  const [editingContents, setEditingContents] = useState([]);
 
   if (!isOpen) return null;
+
+  // Iniciar edição de matéria
+  const handleStartEdit = (subject) => {
+    setEditingId(subject.id);
+    setEditingName(subject.name);
+    setEditingContents([...(subject.contents || [])]);
+    setExpandedSubject(subject.id);
+  };
+
+  // Cancelar edição
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditingName('');
+    setEditingContents([]);
+  };
+
+  // Atualizar conteúdo editável
+  const handleUpdateEditingContent = (index, newValue) => {
+    const updated = [...editingContents];
+    updated[index] = newValue;
+    setEditingContents(updated);
+  };
+
+  // Remover conteúdo durante edição
+  const handleRemoveEditingContent = (index) => {
+    const updated = editingContents.filter((_, i) => i !== index);
+    setEditingContents(updated);
+  };
+
+  // Adicionar novo conteúdo durante edição
+  const handleAddEditingContent = () => {
+    setEditingContents([...editingContents, '']);
+  };
+
+  // Salvar edição
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    if (!editingName.trim()) {
+      setMessage({ type: 'error', text: 'Digite o nome da matéria.' });
+      return;
+    }
+
+    // Validar que todos os conteúdos têm texto
+    const hasEmptyContents = editingContents.some(c => !c.trim());
+    if (hasEmptyContents) {
+      setMessage({ type: 'error', text: 'Todos os conteúdos devem ter texto. Remova os vazios ou preencha-os.' });
+      return;
+    }
+
+    try {
+      await updateSubject(editingId, editingName.trim(), editingContents.map(c => c.trim()));
+      handleCancelEdit();
+      setMessage({ type: 'success', text: 'Matéria atualizada com sucesso!' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Erro ao atualizar matéria.' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 5000);
+    }
+  };
 
   // Criar nova matéria
   const handleCreateSubject = async (e) => {
@@ -141,27 +208,94 @@ const ManageSubjects = ({ isOpen, onClose }) => {
         )}
 
         <div className="p-6 space-y-6">
-          {/* Formulário para criar nova matéria */}
-          <div className="bg-gray-50 rounded-lg p-4">
+          {/* Formulário para criar/editar matéria */}
+          <div className={`rounded-lg p-4 ${editingId ? 'bg-blue-50 border-2 border-blue-200' : 'bg-gray-50'}`}>
             <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
-              <Plus className="w-5 h-5 text-indigo-600" />
-              Nova Matéria
+              {editingId ? (
+                <>
+                  <Pencil className="w-5 h-5 text-indigo-600" />
+                  Editar Matéria
+                </>
+              ) : (
+                <>
+                  <Plus className="w-5 h-5 text-indigo-600" />
+                  Nova Matéria
+                </>
+              )}
             </h3>
-            <form onSubmit={handleCreateSubject} className="flex gap-2">
-              <input
-                type="text"
-                value={newSubjectName}
-                onChange={(e) => setNewSubjectName(e.target.value)}
-                placeholder="Ex: Matemática, Português, História..."
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Criar
-              </button>
+            <form onSubmit={editingId ? handleSaveEdit : handleCreateSubject} className="space-y-3">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={editingId ? editingName : newSubjectName}
+                  onChange={(e) => editingId ? setEditingName(e.target.value) : setNewSubjectName(e.target.value)}
+                  placeholder="Ex: Matemática, Português, História..."
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  disabled={!!editingId && false}
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                >
+                  {editingId ? (
+                    <>
+                      <CheckCircle className="w-4 h-4" />
+                      Salvar Alterações
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4" />
+                      Criar
+                    </>
+                  )}
+                </button>
+                {editingId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors flex items-center gap-2"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    Cancelar
+                  </button>
+                )}
+              </div>
+
+              {/* Conteúdos editáveis (apenas durante edição) */}
+              {editingId && (
+                <div className="mt-3 space-y-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Conteúdos:
+                  </label>
+                  {editingContents.map((content, index) => (
+                    <div key={index} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={content}
+                        onChange={(e) => handleUpdateEditingContent(index, e.target.value)}
+                        placeholder={`Conteúdo ${index + 1}...`}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveEditingContent(index)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Remover conteúdo"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={handleAddEditingContent}
+                    className="w-full px-3 py-2 text-sm text-indigo-600 border border-indigo-300 rounded-lg hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Adicionar Conteúdo
+                  </button>
+                </div>
+              )}
             </form>
           </div>
 
@@ -198,13 +332,22 @@ const ManageSubjects = ({ isOpen, onClose }) => {
                           expandedSubject === subject.id ? null : subject.id
                         )}
                         className="px-3 py-1 text-sm text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                        disabled={editingId === subject.id}
                       >
                         {expandedSubject === subject.id ? 'Ocultar' : 'Ver Conteúdos'}
                       </button>
                       <button
+                        onClick={() => handleStartEdit(subject)}
+                        disabled={editingId === subject.id || !!editingId}
+                        className="p-2 text-indigo-600 hover:bg-indigo-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Editar matéria"
+                      >
+                        <Pencil className="w-5 h-5" />
+                      </button>
+                      <button
                         onClick={() => handleDeleteSubject(subject.id, subject.name)}
-                        disabled={deletingSubject === subject.id}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                        disabled={deletingSubject === subject.id || editingId === subject.id}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         title="Excluir matéria"
                       >
                         <Trash2 className="w-5 h-5" />
@@ -212,8 +355,8 @@ const ManageSubjects = ({ isOpen, onClose }) => {
                     </div>
                   </div>
 
-                  {/* Conteúdos (expandido) */}
-                  {expandedSubject === subject.id && (
+                  {/* Conteúdos (expandido) - apenas se não estiver editando */}
+                  {expandedSubject === subject.id && editingId !== subject.id && (
                     <div className="p-4 bg-white space-y-3">
                       {/* Lista de conteúdos */}
                       {subject.contents && subject.contents.length > 0 ? (
