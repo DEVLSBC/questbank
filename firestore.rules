@@ -1,0 +1,55 @@
+// Regras de Segurança do Firestore
+// Multi-tenant lógico: cada usuário só acessa seus próprios dados
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Regras para a coleção 'users'
+    match /users/{userId} {
+      // Usuário só pode ler/escrever seus próprios dados
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Regras para a coleção 'questions'
+    match /questions/{questionId} {
+      // Criar: usuário deve estar autenticado
+      allow create: if request.auth != null 
+        && request.resource.data.uid == request.auth.uid;
+      
+      // Ler: usuário só pode ler suas próprias questões
+      allow read: if request.auth != null 
+        && resource.data.uid == request.auth.uid;
+      
+      // Atualizar: usuário só pode atualizar suas próprias questões
+      allow update: if request.auth != null 
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+      
+      // Deletar: usuário só pode deletar suas próprias questões
+      allow delete: if request.auth != null 
+        && resource.data.uid == request.auth.uid;
+    }
+    
+    // Regras para a coleção 'subjects'
+    match /subjects/{subjectId} {
+      // Criar: usuário deve estar autenticado e o uid deve corresponder
+      allow create: if request.auth != null 
+        && request.resource.data.uid == request.auth.uid;
+      
+      // Ler: usuário só pode ler suas próprias matérias
+      allow read: if request.auth != null 
+        && resource.data.uid == request.auth.uid;
+      
+      // Atualizar: usuário só pode atualizar suas próprias matérias
+      allow update: if request.auth != null 
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+      
+      // Deletar: usuário só pode deletar suas próprias matérias
+      allow delete: if request.auth != null 
+        && resource.data.uid == request.auth.uid;
+    }
+  }
+}
+
