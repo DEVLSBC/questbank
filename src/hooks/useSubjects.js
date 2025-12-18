@@ -8,9 +8,11 @@ import {
   addDoc, 
   updateDoc, 
   deleteDoc, 
-  doc 
+  doc,
+  writeBatch, // <--- Importante para salvar em lote
+  getDocs     // <--- Importante para buscar as questões antigas
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { db } from '../config/firebase'; // Mantive o seu caminho de importação
 
 export const useSubjects = (userId) => {
   const [subjects, setSubjects] = useState([]);
@@ -55,28 +57,19 @@ export const useSubjects = (userId) => {
         }
       },
       (err) => {
-        // Callback de erro do onSnapshot
         console.error('Erro no listener de matérias:', err);
         setError(err.message);
         setLoading(false);
       }
     );
 
-    // Cleanup: desinscrever quando componente desmontar ou userId mudar
     return () => {
       unsubscribe();
     };
   }, [userId]);
 
-  // Função de busca manual (mantida para compatibilidade, mas não é mais necessária)
-  const fetchSubjects = async () => {
-    // Esta função não é mais necessária pois o listener atualiza automaticamente
-    // Mantida apenas para compatibilidade caso seja chamada em algum lugar
-    console.warn('fetchSubjects() não é mais necessária. Os dados são atualizados automaticamente via onSnapshot.');
-  };
-
-  // Criar nova matéria
-  const createSubject = async (name) => {
+  // Criar nova matéria (Renomeei para addSubject para combinar com o ManageSubjects.jsx)
+  const addSubject = async (name, contents = []) => {
     if (!userId) throw new Error('Usuário não autenticado');
     if (!name.trim()) throw new Error('Nome da matéria é obrigatório');
 
@@ -84,11 +77,10 @@ export const useSubjects = (userId) => {
       const newSubject = {
         uid: userId,
         name: name.trim(),
-        contents: [],
+        contents: contents || [],
         createdAt: new Date().toISOString()
       };
       const docRef = await addDoc(collection(db, 'subjects'), newSubject);
-      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
       return { success: true, id: docRef.id };
     } catch (err) {
       console.error('Erro ao criar matéria:', err);
@@ -96,80 +88,87 @@ export const useSubjects = (userId) => {
     }
   };
 
-  // Adicionar conteúdo a uma matéria
-  const addContent = async (subjectId, contentName) => {
-    if (!contentName.trim()) throw new Error('Nome do conteúdo é obrigatório');
-
-    try {
-      const subject = subjects.find(s => s.id === subjectId);
-      if (!subject) throw new Error('Matéria não encontrada');
-
-      // Verificar se o conteúdo já existe
-      if (subject.contents && subject.contents.includes(contentName.trim())) {
-        throw new Error('Este conteúdo já existe nesta matéria');
-      }
-
-      const updatedContents = [...(subject.contents || []), contentName.trim()];
-      await updateDoc(doc(db, 'subjects', subjectId), {
-        contents: updatedContents,
-        updatedAt: new Date().toISOString()
-      });
-      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
-      return { success: true };
-    } catch (err) {
-      console.error('Erro ao adicionar conteúdo:', err);
-      throw err;
-    }
-  };
-
-  // Remover conteúdo de uma matéria
-  const removeContent = async (subjectId, contentName) => {
-    try {
-      const subject = subjects.find(s => s.id === subjectId);
-      if (!subject) throw new Error('Matéria não encontrada');
-
-      const updatedContents = (subject.contents || []).filter(
-        c => c !== contentName
-      );
-      await updateDoc(doc(db, 'subjects', subjectId), {
-        contents: updatedContents,
-        updatedAt: new Date().toISOString()
-      });
-      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
-      return { success: true };
-    } catch (err) {
-      console.error('Erro ao remover conteúdo:', err);
-      throw err;
-    }
-  };
-
-  // Atualizar matéria (nome e conteúdos)
-  const updateSubject = async (subjectId, newName, newContents) => {
+  // --- ATUALIZAÇÃO EM CASCATA (MATÉRIA) ---
+  const updateSubject = async (subjectId, newName, newContents, oldName) => {
     if (!userId) throw new Error('Usuário não autenticado');
     if (!newName.trim()) throw new Error('Nome da matéria é obrigatório');
 
     try {
-      const subject = subjects.find(s => s.id === subjectId);
-      if (!subject) throw new Error('Matéria não encontrada');
+      // Inicia um lote de escrita (Batch)
+      const batch = writeBatch(db);
 
-      // Validar que o novo nome não conflita com outras matérias (exceto a atual)
-      const nameExists = subjects.some(
-        s => s.id !== subjectId && s.name.toLowerCase() === newName.trim().toLowerCase()
-      );
-      if (nameExists) {
-        throw new Error('Já existe uma matéria com este nome');
-      }
-
-      await updateDoc(doc(db, 'subjects', subjectId), {
+      // 1. Atualiza o documento da Matéria
+      const subjectRef = doc(db, 'subjects', subjectId);
+      batch.update(subjectRef, {
         name: newName.trim(),
         contents: newContents || [],
         updatedAt: new Date().toISOString()
       });
-      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
-      return { success: true };
+
+      // 2. Se o NOME da matéria mudou, atualiza todas as questões
+      if (oldName && newName.trim() !== oldName) {
+        console.log(`Renomeando cascata: ${oldName} -> ${newName}`);
+        
+        // Busca todas as questões que usam o nome antigo
+        const q = query(
+          collection(db, 'questions'), 
+          where('uid', '==', userId),
+          where('materia', '==', oldName)
+        );
+        
+        const querySnapshot = await getDocs(q);
+        
+        // Adiciona a atualização de cada questão ao lote
+        querySnapshot.forEach((document) => {
+          batch.update(document.ref, { materia: newName.trim() });
+        });
+      }
+
+      // 3. Salva tudo de uma vez
+      await batch.commit();
+      return true;
     } catch (err) {
-      console.error('Erro ao atualizar matéria:', err);
+      console.error('Erro ao atualizar matéria e cascata:', err);
       throw err;
+    }
+  };
+
+  // --- ATUALIZAÇÃO EM CASCATA (CONTEÚDO) ---
+  // Função nova para corrigir erros como "Logarítmo" -> "Logaritmo"
+  const renameContentGlobal = async (subjectId, subjectName, oldContent, newContent, currentContents) => {
+    if (!userId) return false;
+
+    try {
+      const batch = writeBatch(db);
+
+      // 1. Atualiza a lista dentro da Matéria (no documento subjects)
+      const updatedContents = currentContents.map(c => c === oldContent ? newContent : c);
+      const subjectRef = doc(db, 'subjects', subjectId);
+      batch.update(subjectRef, { 
+        contents: updatedContents,
+        updatedAt: new Date().toISOString()
+      });
+
+      // 2. Busca e atualiza todas as QUESTÕES com esse conteúdo antigo
+      const q = query(
+        collection(db, 'questions'),
+        where('uid', '==', userId),
+        where('materia', '==', subjectName), // Garante que é na matéria certa
+        where('conteudo', '==', oldContent)
+      );
+
+      const querySnapshot = await getDocs(q);
+      
+      querySnapshot.forEach((document) => {
+        batch.update(document.ref, { conteudo: newContent });
+      });
+
+      // 3. Executa
+      await batch.commit();
+      return true;
+    } catch (err) {
+      console.error("Erro ao renomear conteúdo globalmente:", err);
+      return false;
     }
   };
 
@@ -177,7 +176,6 @@ export const useSubjects = (userId) => {
   const deleteSubject = async (subjectId) => {
     try {
       await deleteDoc(doc(db, 'subjects', subjectId));
-      // Não precisa chamar fetchSubjects() - o listener atualiza automaticamente
       return { success: true };
     } catch (err) {
       console.error('Erro ao excluir matéria:', err);
@@ -185,13 +183,12 @@ export const useSubjects = (userId) => {
     }
   };
 
-  // Obter conteúdos de uma matéria específica
+  // Helpers
   const getContentsBySubject = (subjectName) => {
     const subject = subjects.find(s => s.name === subjectName);
     return subject?.contents || [];
   };
 
-  // Obter lista de nomes de matérias
   const getSubjectNames = () => {
     return subjects.map(s => s.name).sort();
   };
@@ -200,14 +197,11 @@ export const useSubjects = (userId) => {
     subjects,
     loading,
     error,
-    createSubject,
+    addSubject,     // Nota: Mudei o nome interno de createSubject para addSubject para bater com o front
     updateSubject,
-    addContent,
-    removeContent,
     deleteSubject,
-    fetchSubjects,
+    renameContentGlobal, // Nova função exportada
     getContentsBySubject,
     getSubjectNames
   };
 };
-

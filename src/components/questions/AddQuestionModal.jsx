@@ -2,7 +2,8 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSubjects } from '../../hooks/useSubjects';
-import { X, Save, AlertCircle, Plus, Trash2 } from 'lucide-react';
+import { X, Save, AlertCircle, Plus, Trash2, Image as ImageIcon } from 'lucide-react';
+
 
 const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) => {
   const { currentUser } = useAuth();
@@ -10,14 +11,18 @@ const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) =>
   
   // Estado inicial do formulário
   const [formData, setFormData] = useState({
-    type: 'discursiva', // 'discursiva' ou 'objetiva'
-    subtype: '', // Para questões objetivas
+    type: 'discursiva',
+    subtype: '',
     enunciado: '',
     materia: '',
     conteudo: '',
     nivel: 'Médio',
-    options: [], // Array de alternativas para questões objetivas
-    answer: '' // Gabarito/resposta
+    options: [],
+    answer: '',
+    questionImage: '', // Novo campo para a imagem Base64
+    // NOVOS CAMPOS PARA DISCURSIVA (Exatas)
+    answerStyle: 'lines', // 'lines' ou 'blank'
+    answerSize: 'medium'  // 'small', 'medium', 'large'
   });
 
   // Preencher formulário se estiver editando
@@ -50,7 +55,11 @@ const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) =>
           conteudo: questionToEdit.conteudo || '',
           nivel: questionToEdit.nivel || 'Médio',
           options: questionToEdit.options || [],
-          answer: questionToEdit.resposta || questionToEdit.answer || ''
+          questionImage: questionToEdit.questionImage || '',
+          answer: questionToEdit.resposta || questionToEdit.answer || '',
+          // Defaults para migração
+          answerStyle: 'lines',
+          answerSize: 'medium'
         });
       } else {
         // Formato novo
@@ -62,7 +71,11 @@ const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) =>
           conteudo: questionToEdit.conteudo || '',
           nivel: questionToEdit.nivel || 'Médio',
           options: questionToEdit.options || [],
-          answer: questionToEdit.answer || ''
+          questionImage: questionToEdit.questionImage || '',
+          answer: questionToEdit.answer || '',
+          // Carregar configurações de espaço ou usar default
+          answerStyle: questionToEdit.answerStyle || 'lines',
+          answerSize: questionToEdit.answerSize || 'medium'
         });
       }
     } else {
@@ -75,7 +88,9 @@ const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) =>
         conteudo: '',
         nivel: 'Médio',
         options: [],
-        answer: ''
+        answer: '',
+        answerStyle: 'lines',
+        answerSize: 'medium'
       });
     }
   }, [questionToEdit, isOpen]);
@@ -153,6 +168,52 @@ const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) =>
     }));
   };
 
+  // --- FUNÇÕES DE IMAGEM ---
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) { // 5MB limit antes de comprimir
+      alert('A imagem é muito grande. Escolha uma menor que 5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        // Criar canvas para redimensionar
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Redimensionar se for maior que 600px (largura)
+        const MAX_WIDTH = 600;
+        if (width > MAX_WIDTH) {
+          height = (height * MAX_WIDTH) / width;
+          width = MAX_WIDTH;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Converter para Base64 (JPEG 0.7 qualidade para ficar leve)
+        const base64String = canvas.toDataURL('image/jpeg', 0.7);
+        setFormData(prev => ({ ...prev, questionImage: base64String }));
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveImage = () => {
+    setFormData(prev => ({ ...prev, questionImage: '' }));
+  };
+
+  // --- FIM FUNÇÕES DE IMAGEM ---
+
   // Validações
   const validateForm = () => {
     if (!formData.enunciado.trim()) {
@@ -221,7 +282,11 @@ const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) =>
       materia: formData.materia,
       conteudo: formData.conteudo || '',
       nivel: formData.nivel,
-      answer: formData.answer
+      answer: formData.answer,
+      questionImage: formData.questionImage,
+      // Salvar os novos campos
+      answerStyle: formData.answerStyle,
+      answerSize: formData.answerSize
     };
 
     if (formData.type === 'objetiva') {
@@ -339,6 +404,49 @@ const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) =>
             />
           </div>
 
+          {/* Campo de Imagem da Questão */}
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <ImageIcon className="w-4 h-4" />
+              Imagem de Apoio (Opcional)
+            </label>
+            
+            {!formData.questionImage ? (
+              <div className="flex items-center justify-center w-full">
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-white hover:bg-gray-50">
+                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                    <p className="mb-2 text-sm text-gray-500">
+                      <span className="font-semibold">Clique para enviar</span>
+                    </p>
+                    <p className="text-xs text-gray-500">PNG, JPG (Máx. processado: 600px)</p>
+                  </div>
+                  <input 
+                    type="file" 
+                    className="hidden" 
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="relative w-fit">
+                <img 
+                  src={formData.questionImage} 
+                  alt="Preview da questão" 
+                  className="max-h-48 rounded-lg border border-gray-300 shadow-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleRemoveImage}
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 shadow-md"
+                  title="Remover imagem"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Alerta se não houver matérias cadastradas */}
           {subjects.length === 0 && (
             <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-2 text-yellow-800">
@@ -451,7 +559,6 @@ const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) =>
                         />
                       </div>
 
-                      {/* Controles específicos por subtipo */}
                       <div className="flex items-center gap-2">
                         {isMultiplaEscolha && (
                           <label className="flex items-center gap-1 cursor-pointer">
@@ -494,6 +601,41 @@ const AddQuestionModal = ({ isOpen, onClose, onSave, questionToEdit = null }) =>
               )}
             </div>
           )}
+
+          {/* --- CONFIGURAÇÃO DE ESPAÇO PARA EXATAS (NOVO BLOCO) --- */}
+          {formData.type === 'discursiva' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Estilo da Resposta (Aluno)
+                </label>
+                <select
+                  value={formData.answerStyle || 'lines'}
+                  onChange={(e) => setFormData({ ...formData, answerStyle: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="lines">Com Linhas (Padrão)</option>
+                  <option value="blank">Espaço em Branco (Cálculos/Desenhos)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tamanho do Espaço
+                </label>
+                <select
+                  value={formData.answerSize || 'medium'}
+                  onChange={(e) => setFormData({ ...formData, answerSize: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="small">Pequeno (~5cm)</option>
+                  <option value="medium">Médio (~10cm)</option>
+                  <option value="large">Grande (Meia página)</option>
+                </select>
+              </div>
+            </div>
+          )}
+          {/* --- FIM DO BLOCO NOVO --- */}
 
           {/* Gabarito/Resposta */}
           {formData.type === 'discursiva' || (isObjetiva && !isMultiplaEscolha && !isVerdadeiroFalso) ? (

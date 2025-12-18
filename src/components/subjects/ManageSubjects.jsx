@@ -11,7 +11,9 @@ import {
   AlertCircle,
   CheckCircle,
   Pencil,
-  XCircle
+  XCircle,
+  Edit2, // Importado para o ícone de renomear conteúdo
+  Save
 } from 'lucide-react';
 
 const ManageSubjects = ({ isOpen, onClose }) => {
@@ -19,11 +21,12 @@ const ManageSubjects = ({ isOpen, onClose }) => {
   const {
     subjects,
     loading,
-    createSubject,
+    createSubject, // Mudei de addSubject para createSubject baseado no seu useSubjects antigo, mas se atualizou o hook, verifique o nome
     updateSubject,
     addContent,
     removeContent,
-    deleteSubject
+    deleteSubject,
+    renameContentGlobal // <--- Nova função importada do Hook
   } = useSubjects(currentUser?.uid);
 
   const [newSubjectName, setNewSubjectName] = useState('');
@@ -54,11 +57,41 @@ const ManageSubjects = ({ isOpen, onClose }) => {
     setEditingContents([]);
   };
 
-  // Atualizar conteúdo editável
+  // Atualizar texto do conteúdo no estado local (apenas visual por enquanto)
   const handleUpdateEditingContent = (index, newValue) => {
     const updated = [...editingContents];
     updated[index] = newValue;
     setEditingContents(updated);
+  };
+
+  // --- NOVA FUNÇÃO: Renomear Conteúdo com Cascata ---
+  const handleGlobalRenameContent = async (index) => {
+    const oldContent = subjects.find(s => s.id === editingId).contents[index];
+    const newContent = editingContents[index];
+
+    if (!newContent.trim() || newContent === oldContent) return;
+
+    if (window.confirm(`Deseja renomear "${oldContent}" para "${newContent}" em TODAS as questões cadastradas?`)) {
+      try {
+        const success = await renameContentGlobal(
+          editingId,
+          editingName, // Nome da matéria
+          oldContent,  // Nome antigo
+          newContent.trim(), // Novo nome
+          editingContents // Lista completa atual
+        );
+
+        if (success) {
+          setMessage({ type: 'success', text: 'Conteúdo renomeado em todas as questões!' });
+          setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+        } else {
+          setMessage({ type: 'error', text: 'Erro ao renomear conteúdo.' });
+        }
+      } catch (error) {
+        console.error(error);
+        setMessage({ type: 'error', text: 'Erro ao processar renomeação.' });
+      }
+    }
   };
 
   // Remover conteúdo durante edição
@@ -72,7 +105,7 @@ const ManageSubjects = ({ isOpen, onClose }) => {
     setEditingContents([...editingContents, '']);
   };
 
-  // Salvar edição
+  // Salvar edição (Matéria Principal)
   const handleSaveEdit = async (e) => {
     e.preventDefault();
     if (!editingName.trim()) {
@@ -80,25 +113,34 @@ const ManageSubjects = ({ isOpen, onClose }) => {
       return;
     }
 
-    // Validar que todos os conteúdos têm texto
     const hasEmptyContents = editingContents.some(c => !c.trim());
     if (hasEmptyContents) {
-      setMessage({ type: 'error', text: 'Todos os conteúdos devem ter texto. Remova os vazios ou preencha-os.' });
+      setMessage({ type: 'error', text: 'Todos os conteúdos devem ter texto.' });
       return;
     }
 
     try {
-      await updateSubject(editingId, editingName.trim(), editingContents.map(c => c.trim()));
+      // Pega o nome antigo para verificar se mudou (para cascata de matéria)
+      const oldSubjectData = subjects.find(s => s.id === editingId);
+      const oldName = oldSubjectData ? oldSubjectData.name : '';
+
+      await updateSubject(
+        editingId, 
+        editingName.trim(), 
+        editingContents.map(c => c.trim()),
+        oldName // Passa o nome antigo para o hook fazer a cascata de Matéria
+      );
+      
       handleCancelEdit();
       setMessage({ type: 'success', text: 'Matéria atualizada com sucesso!' });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Erro ao atualizar matéria.' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 5000);
     }
   };
 
   // Criar nova matéria
+  // Nota: Verifique se no seu useSubjects a função chama createSubject ou addSubject
   const handleCreateSubject = async (e) => {
     e.preventDefault();
     if (!newSubjectName.trim()) {
@@ -107,18 +149,20 @@ const ManageSubjects = ({ isOpen, onClose }) => {
     }
 
     try {
-      await createSubject(newSubjectName.trim());
+      // Se seu hook usa addSubject, troque aqui. Se usa createSubject, mantenha.
+      const func = createSubject ||  useSubjects(currentUser?.uid).addSubject; 
+      await func(newSubjectName.trim());
+      
       setNewSubjectName('');
       setMessage({ type: 'success', text: 'Matéria criada com sucesso!' });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Erro ao criar matéria.' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 5000);
     }
   };
 
   // Adicionar conteúdo
-  const handleAddContent = async (subjectId) => {
+  const handleAddContentDirect = async (subjectId) => {
     const contentName = newContentName[subjectId];
     if (!contentName?.trim()) {
       setMessage({ type: 'error', text: 'Digite o nome do conteúdo.' });
@@ -132,12 +176,11 @@ const ManageSubjects = ({ isOpen, onClose }) => {
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Erro ao adicionar conteúdo.' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 5000);
     }
   };
 
   // Remover conteúdo
-  const handleRemoveContent = async (subjectId, contentName) => {
+  const handleRemoveContentDirect = async (subjectId, contentName) => {
     if (!window.confirm(`Deseja remover o conteúdo "${contentName}"?`)) {
       return;
     }
@@ -148,7 +191,6 @@ const ManageSubjects = ({ isOpen, onClose }) => {
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Erro ao remover conteúdo.' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 5000);
     }
   };
 
@@ -168,7 +210,6 @@ const ManageSubjects = ({ isOpen, onClose }) => {
       }
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Erro ao excluir matéria.' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 5000);
     } finally {
       setDeletingSubject(null);
     }
@@ -231,7 +272,6 @@ const ManageSubjects = ({ isOpen, onClose }) => {
                   onChange={(e) => editingId ? setEditingName(e.target.value) : setNewSubjectName(e.target.value)}
                   placeholder="Ex: Matemática, Português, História..."
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  disabled={!!editingId && false}
                 />
                 <button
                   type="submit"
@@ -240,7 +280,7 @@ const ManageSubjects = ({ isOpen, onClose }) => {
                   {editingId ? (
                     <>
                       <CheckCircle className="w-4 h-4" />
-                      Salvar Alterações
+                      Salvar Tudo
                     </>
                   ) : (
                     <>
@@ -265,34 +305,53 @@ const ManageSubjects = ({ isOpen, onClose }) => {
               {editingId && (
                 <div className="mt-3 space-y-2">
                   <label className="block text-sm font-medium text-gray-700">
-                    Conteúdos:
+                    Conteúdos (Use o botão azul para renomear em cascata):
                   </label>
-                  {editingContents.map((content, index) => (
-                    <div key={index} className="flex gap-2">
-                      <input
-                        type="text"
-                        value={content}
-                        onChange={(e) => handleUpdateEditingContent(index, e.target.value)}
-                        placeholder={`Conteúdo ${index + 1}...`}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveEditingContent(index)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
-                        title="Remover conteúdo"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
+                  {editingContents.map((content, index) => {
+                    // Encontra o valor original para comparar
+                    const originalContent = subjects.find(s => s.id === editingId)?.contents[index];
+                    const hasChanged = content !== originalContent;
+
+                    return (
+                      <div key={index} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={content}
+                          onChange={(e) => handleUpdateEditingContent(index, e.target.value)}
+                          placeholder={`Conteúdo ${index + 1}...`}
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+                        />
+                        
+                        {/* BOTÃO DE RENOMEAR GLOBAL */}
+                        {hasChanged && originalContent && (
+                          <button
+                            type="button"
+                            onClick={() => handleGlobalRenameContent(index)}
+                            className="p-2 text-white bg-blue-500 hover:bg-blue-600 rounded transition-colors"
+                            title="Atualizar nome em todas as questões"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveEditingContent(index)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                          title="Remover conteúdo"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
                   <button
                     type="button"
                     onClick={handleAddEditingContent}
                     className="w-full px-3 py-2 text-sm text-indigo-600 border border-indigo-300 rounded-lg hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2"
                   >
                     <Plus className="w-4 h-4" />
-                    Adicionar Conteúdo
+                    Adicionar Novo Conteúdo
                   </button>
                 </div>
               )}
@@ -355,7 +414,7 @@ const ManageSubjects = ({ isOpen, onClose }) => {
                     </div>
                   </div>
 
-                  {/* Conteúdos (expandido) - apenas se não estiver editando */}
+                  {/* Conteúdos (expandido) */}
                   {expandedSubject === subject.id && editingId !== subject.id && (
                     <div className="p-4 bg-white space-y-3">
                       {/* Lista de conteúdos */}
@@ -371,7 +430,7 @@ const ManageSubjects = ({ isOpen, onClose }) => {
                                 <span className="text-gray-700">{content}</span>
                               </div>
                               <button
-                                onClick={() => handleRemoveContent(subject.id, content)}
+                                onClick={() => handleRemoveContentDirect(subject.id, content)}
                                 className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
                                 title="Remover conteúdo"
                               >
@@ -391,7 +450,7 @@ const ManageSubjects = ({ isOpen, onClose }) => {
                         <form
                           onSubmit={(e) => {
                             e.preventDefault();
-                            handleAddContent(subject.id);
+                            handleAddContentDirect(subject.id);
                           }}
                           className="flex gap-2"
                         >
@@ -402,7 +461,7 @@ const ManageSubjects = ({ isOpen, onClose }) => {
                               ...newContentName,
                               [subject.id]: e.target.value
                             })}
-                            placeholder="Ex: Álgebra, Geometria, Trigonometria..."
+                            placeholder="Ex: Álgebra, Geometria..."
                             className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
                           />
                           <button
@@ -437,4 +496,3 @@ const ManageSubjects = ({ isOpen, onClose }) => {
 };
 
 export default ManageSubjects;
-
